@@ -54,3 +54,27 @@ g++ -std=c++17 -O3 -ffinite-math-only -frename-registers \
 gprof -b probe_cpu_profile gmon.out
 ```
 The probe is temporary; the reproducible harness will be committed once built.
+
+## Checkpoint 2: buildable candidate and independent oracle
+Predecessor: `06eb660f9b8853ae6c5a9b43642bd561fc75b60f`.
+- Modified `src/transformCPU.h`: square recursion has a compile-time size.
+- Added `test/cpu_square.cpp`: full base-b polynomial reconstruction with GMP,
+  heterogeneous bases, masks, copy/prepared multiplication, and whole-square timing.
+- Baseline gprof (2048 measured + 32 warmup squares, n=15/batch=8): 57.36%
+  sampled time in square_e/o, 24.63% carry. Instrumented timings are not used as
+  performance claims.
+- GCC 13.3 builds PASS; baseline/candidate short-run hashes match at n=15 and 16.
+- Initial timings are noisy and inconclusive; no performance KEEP.
+- New adversarial GMP test FAILS at check 3, lane 3 (base 1048574, all -1 input).
+  Baseline comparison is being run to distinguish an inherited issue from a
+  specialization regression. Do not merge this provisional candidate.
+- Exact build command (matching local GMP headers were extracted to ../deps):
+```sh
+g++ -std=c++17 -O3 -ffinite-math-only -frename-registers \
+  -fprefetch-loop-arrays -mavx512f -mtune=znver3 \
+  -I ../deps/usr/include/x86_64-linux-gnu -I src test/cpu_square.cpp \
+  -l:libgmp.so.10 -o ../cpu_square_candidate15_8
+../cpu_square_candidate15_8 verify
+```
+Next: run this same harness against unmodified baseline headers; diagnose the
+exact full-residue mismatch before further performance work.

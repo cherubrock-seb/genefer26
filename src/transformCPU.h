@@ -501,20 +501,23 @@ private:
 		for (size_t k = 0; k < N / 4; ++k) Complex_8_pair::forward4_0(&z[k], N / 4);
 	}
 
-	static void square_e(Complex_8_pair * const z, const TwiddleFactor * const w, const size_t m, const size_t sj)
+	// The transform geometry is fixed. Keep each butterfly in the original order
+	// while exposing leaf sizes and strides to the compiler.
+	template<size_t m>
+	static void square_e(Complex_8_pair * const z, const TwiddleFactor * const w, const size_t sj)
 	{
 		const TwiddleFactor w1 = w[sj], w20 = w[2 * sj + 0];
 
 		for (size_t i = 0; i < m; ++i) Complex_8_pair::forward4e(&z[i], m, w1, w20);
 
-		if (m > 4)
+		if constexpr (m > 4)
 		{
-			square_e(&z[0 * m], w, m / 4, 4 * sj + 0);
-			square_o(&z[1 * m], w, m / 4, 4 * sj + 0);
-			square_e(&z[2 * m], w, m / 4, 4 * sj + 1);
-			square_o(&z[3 * m], w, m / 4, 4 * sj + 1);
+			square_e<m / 4>(&z[0 * m], w, 4 * sj + 0);
+			square_o<m / 4>(&z[1 * m], w, 4 * sj + 0);
+			square_e<m / 4>(&z[2 * m], w, 4 * sj + 1);
+			square_o<m / 4>(&z[3 * m], w, 4 * sj + 1);
 		}
-		else if (m == 4)
+		else if constexpr (m == 4)
 		{
 			const TwiddleFactor w40 = w[4 * sj + 0], w41 = w[4 * sj + 1];
 
@@ -532,20 +535,21 @@ private:
 		for (size_t i = 0; i < m; ++i) Complex_8_pair::backward4e(&z[i], m, w1, w20);
 	}
 
-	static void square_o(Complex_8_pair * const z, const TwiddleFactor * const w, const size_t m, const size_t sj)
+	template<size_t m>
+	static void square_o(Complex_8_pair * const z, const TwiddleFactor * const w, const size_t sj)
 	{
 		const TwiddleFactor w1 = w[sj], w21 = w[2 * sj + 1];
 
 		for (size_t i = 0; i < m; ++i) Complex_8_pair::forward4o(&z[i], m, w1, w21);
 
-		if (m > 4)
+		if constexpr (m > 4)
 		{
-			square_e(&z[0 * m], w, m / 4, 4 * sj + 2);
-			square_o(&z[1 * m], w, m / 4, 4 * sj + 2);
-			square_e(&z[2 * m], w, m / 4, 4 * sj + 3);
-			square_o(&z[3 * m], w, m / 4, 4 * sj + 3);
+			square_e<m / 4>(&z[0 * m], w, 4 * sj + 2);
+			square_o<m / 4>(&z[1 * m], w, 4 * sj + 2);
+			square_e<m / 4>(&z[2 * m], w, 4 * sj + 3);
+			square_o<m / 4>(&z[3 * m], w, 4 * sj + 3);
 		}
-		else if (m == 4)
+		else if constexpr (m == 4)
 		{
 			const TwiddleFactor w42 = w[4 * sj + 2], w43 = w[4 * sj + 3];
 
@@ -796,10 +800,10 @@ public:
 		Complex_8_pair * const z = &_mem[_num_regs * N * thread_id];
 
 		forward4_0(z);
-		square_e(&z[0 * (N / 4)], w, N / 16, 4 + 0);
-		square_o(&z[1 * (N / 4)], w, N / 16, 4 + 0);
-		square_e(&z[2 * (N / 4)], w, N / 16, 4 + 1);
-		square_o(&z[3 * (N / 4)], w, N / 16, 4 + 1);
+		square_e<N / 16>(&z[0 * (N / 4)], w, 4 + 0);
+		square_o<N / 16>(&z[1 * (N / 4)], w, 4 + 0);
+		square_e<N / 16>(&z[2 * (N / 4)], w, 4 + 1);
+		square_o<N / 16>(&z[3 * (N / 4)], w, 4 + 1);
 		_err_array[thread_id] = backward4_0_carry(z, _base[thread_id], _base_inv[thread_id], (_sq_dup >> (8 * thread_id)) & 0xff);
 	}
 
