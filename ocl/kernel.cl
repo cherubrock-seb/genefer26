@@ -67,6 +67,10 @@ Please give feedback to the authors if improvement is realized. It is distribute
 // #define QVALID			1
 #endif
 
+#ifndef GENEFER_GPU_REGTILE
+#define GENEFER_GPU_REGTILE 0
+#endif
+
 #define N_VSIZE		(N_SZ * VSIZE)
 #define N_VLEN		(N_SZ * VSIZE / OCL_VSIZE)
 
@@ -1021,6 +1025,213 @@ void square512(__global VTYPE * restrict const zg, __global const uint_32 * rest
 
 #endif
 #endif
+
+// --- experimental register-tiled square ---
+// Default-off: exactness and throughput require independent GPU validation.
+#if GENEFER_GPU_REGTILE && !defined(QVALID) && LN_SZ >= 15 && LN_SZ <= 18
+
+INLINE void _reg_forward16(const uint2_32 pq, VTYPE z[16],
+	__global const uint_32 * restrict const w, const sz_t sj)
+{
+	for (sz_t i = 0; i < 8; ++i) { FWD2(z[i], z[i + 8], w[sj]); }
+	_forward8(pq, z, w[2 * sj], _load2g(w, 2 * sj), _load4g(w, 2 * sj));
+	_forward8(pq, z + 8, w[2 * sj + 1], _load2g(w, 2 * sj + 1), _load4g(w, 2 * sj + 1));
+}
+
+INLINE void _reg_backward16(const uint2_32 pq, VTYPE z[16],
+	__global const uint_32 * restrict const w, const sz_t sji)
+{
+	_backward8r(pq, z, w[2 * sji + 1], _load2g(w, 2 * sji + 1), _load4g(w, 2 * sji + 1));
+	_backward8r(pq, z + 8, w[2 * sji], _load2g(w, 2 * sji), _load4g(w, 2 * sji));
+	for (sz_t i = 0; i < 8; ++i) { BCK2(z[i], z[i + 8], w[sji]); }
+}
+
+INLINE void _reg_forward32(const uint2_32 pq, VTYPE z[32],
+	__global const uint_32 * restrict const w, const sz_t sj)
+{
+	for (sz_t i = 0; i < 16; ++i) { FWD2(z[i], z[i + 16], w[sj]); }
+	_reg_forward16(pq, z, w, 2 * sj);
+	_reg_forward16(pq, z + 16, w, 2 * sj + 1);
+}
+
+INLINE void _reg_backward32(const uint2_32 pq, VTYPE z[32],
+	__global const uint_32 * restrict const w, const sz_t sji)
+{
+	_reg_backward16(pq, z, w, 2 * sji + 1);
+	_reg_backward16(pq, z + 16, w, 2 * sji);
+	for (sz_t i = 0; i < 16; ++i) { BCK2(z[i], z[i + 16], w[sji]); }
+}
+
+// Three forward levels, eight quadratic squares, then three inverse levels.
+// All intermediates remain canonical residues under the existing IS32 rules.
+INLINE void _reg_square16(const uint2_32 pq, VTYPE z[16],
+	__global const uint_32 * restrict const w, const sz_t sj, const sz_t sji)
+{
+	DECLARE_W124();
+	DECLARE_WI124();
+	FWD2(z[0], z[8], w1); FWD2(z[1], z[9], w1);
+	FWD2(z[2], z[10], w1); FWD2(z[3], z[11], w1);
+	FWD2(z[4], z[12], w1); FWD2(z[5], z[13], w1);
+	FWD2(z[6], z[14], w1); FWD2(z[7], z[15], w1);
+	FWD2(z[0], z[4], w2.s0); FWD2(z[1], z[5], w2.s0);
+	FWD2(z[2], z[6], w2.s0); FWD2(z[3], z[7], w2.s0);
+	FWD2(z[8], z[12], w2.s1); FWD2(z[9], z[13], w2.s1);
+	FWD2(z[10], z[14], w2.s1); FWD2(z[11], z[15], w2.s1);
+	FWD2(z[0], z[2], w4.s0); FWD2(z[1], z[3], w4.s0);
+	FWD2(z[4], z[6], w4.s1); FWD2(z[5], z[7], w4.s1);
+	FWD2(z[8], z[10], w4.s2); FWD2(z[9], z[11], w4.s2);
+	FWD2(z[12], z[14], w4.s3); FWD2(z[13], z[15], w4.s3);
+
+	_square2x4(pq, z, w4.s01);
+	_square2x4(pq, z + 8, w4.s23);
+
+	BCK2(z[0], z[2], wi4r.s3); BCK2(z[1], z[3], wi4r.s3);
+	BCK2(z[4], z[6], wi4r.s2); BCK2(z[5], z[7], wi4r.s2);
+	BCK2(z[8], z[10], wi4r.s1); BCK2(z[9], z[11], wi4r.s1);
+	BCK2(z[12], z[14], wi4r.s0); BCK2(z[13], z[15], wi4r.s0);
+	BCK2(z[0], z[4], wi2r.s1); BCK2(z[1], z[5], wi2r.s1);
+	BCK2(z[2], z[6], wi2r.s1); BCK2(z[3], z[7], wi2r.s1);
+	BCK2(z[8], z[12], wi2r.s0); BCK2(z[9], z[13], wi2r.s0);
+	BCK2(z[10], z[14], wi2r.s0); BCK2(z[11], z[15], wi2r.s0);
+	BCK2(z[0], z[8], wi1); BCK2(z[1], z[9], wi1);
+	BCK2(z[2], z[10], wi1); BCK2(z[3], z[11], wi1);
+	BCK2(z[4], z[12], wi1); BCK2(z[5], z[13], wi1);
+	BCK2(z[6], z[14], wi1); BCK2(z[7], z[15], wi1);
+}
+
+#if LN_SZ % 3 == 1
+// 4 tiles/workgroup, 8 work-items/tile, at most 16 VTYPE values/item.
+__kernel __attribute__((reqd_work_group_size(32, 1, 1)))
+void square128_regtile(__global VTYPE * restrict const zg,
+	__global const uint_32 * restrict const wg, __local VTYPE * const Z)
+{
+	const sz_t gid = (sz_t)get_global_id(0), prime = gid / (N_VLEN / 16);
+	const sz_t item = gid % (N_VLEN / 16), tile = item / 8, tid = item % 8;
+	const sz_t j = tile % (N_SZ / 128), sj = N_SZ / 128 + j, sji = 2 * (N_SZ / 128) - j - 1;
+	const uint2_32 pq = g_pq[prime];
+	__global VTYPE * restrict const z = &zg[prime * N_VLEN + tile * 128];
+	__global const uint_32 * restrict const w = &wg[prime * W_SZ];
+	__local VTYPE * const Zt = &Z[(tile % 4) * 128];
+
+	// Column transforms: the work-item owns every value it reads and writes.
+	for (sz_t column = tid; column < 16; column += 8)
+	{
+		VTYPE zl[8];
+		_loadg(8, zl, &z[column], 16);
+		_forward8(pq, zl, w[sj], _load2g(w, sj), _load4g(w, sj));
+		_storel(8, &Zt[column], 16, zl);
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	// Independent length-16 rows need no workgroup exchange internally.
+	for (sz_t row = tid; row < 8; row += 8)
+	{
+		VTYPE zl[16];
+		_loadl(16, zl, &Zt[16 * row], 1);
+		_reg_square16(pq, zl, w, 8 * sj + row, 8 * sji + (8 - row - 1));
+		_storel(16, &Zt[16 * row], 1, zl);
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	for (sz_t column = tid; column < 16; column += 8)
+	{
+		VTYPE zl[8];
+		_loadl(8, zl, &Zt[column], 16);
+		_backward8r(pq, zl, w[sji], _load2g(w, sji), _load4g(w, sji));
+		_storeg(8, &z[column], 16, zl);
+	}
+}
+#endif
+
+#if LN_SZ % 3 == 2
+// 2 tiles/workgroup, 16 work-items/tile, at most 16 VTYPE values/item.
+__kernel __attribute__((reqd_work_group_size(32, 1, 1)))
+void square256_regtile(__global VTYPE * restrict const zg,
+	__global const uint_32 * restrict const wg, __local VTYPE * const Z)
+{
+	const sz_t gid = (sz_t)get_global_id(0), prime = gid / (N_VLEN / 16);
+	const sz_t item = gid % (N_VLEN / 16), tile = item / 16, tid = item % 16;
+	const sz_t j = tile % (N_SZ / 256), sj = N_SZ / 256 + j, sji = 2 * (N_SZ / 256) - j - 1;
+	const uint2_32 pq = g_pq[prime];
+	__global VTYPE * restrict const z = &zg[prime * N_VLEN + tile * 256];
+	__global const uint_32 * restrict const w = &wg[prime * W_SZ];
+	__local VTYPE * const Zt = &Z[(tile % 2) * 256];
+
+	// Column transforms: the work-item owns every value it reads and writes.
+	for (sz_t column = tid; column < 16; column += 16)
+	{
+		VTYPE zl[16];
+		_loadg(16, zl, &z[column], 16);
+		_reg_forward16(pq, zl, w, sj);
+		_storel(16, &Zt[column], 16, zl);
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	// Independent length-16 rows need no workgroup exchange internally.
+	for (sz_t row = tid; row < 16; row += 16)
+	{
+		VTYPE zl[16];
+		_loadl(16, zl, &Zt[16 * row], 1);
+		_reg_square16(pq, zl, w, 16 * sj + row, 16 * sji + (16 - row - 1));
+		_storel(16, &Zt[16 * row], 1, zl);
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	for (sz_t column = tid; column < 16; column += 16)
+	{
+		VTYPE zl[16];
+		_loadl(16, zl, &Zt[column], 16);
+		_reg_backward16(pq, zl, w, sji);
+		_storeg(16, &z[column], 16, zl);
+	}
+}
+#endif
+
+#if LN_SZ % 3 == 0
+// 2 tiles/workgroup, 16 work-items/tile, at most 32 VTYPE values/item.
+__kernel __attribute__((reqd_work_group_size(32, 1, 1)))
+void square512_regtile(__global VTYPE * restrict const zg,
+	__global const uint_32 * restrict const wg, __local VTYPE * const Z)
+{
+	const sz_t gid = (sz_t)get_global_id(0), prime = gid / (N_VLEN / 32);
+	const sz_t item = gid % (N_VLEN / 32), tile = item / 16, tid = item % 16;
+	const sz_t j = tile % (N_SZ / 512), sj = N_SZ / 512 + j, sji = 2 * (N_SZ / 512) - j - 1;
+	const uint2_32 pq = g_pq[prime];
+	__global VTYPE * restrict const z = &zg[prime * N_VLEN + tile * 512];
+	__global const uint_32 * restrict const w = &wg[prime * W_SZ];
+	__local VTYPE * const Zt = &Z[(tile % 2) * 512];
+
+	// Column transforms: the work-item owns every value it reads and writes.
+	for (sz_t column = tid; column < 16; column += 16)
+	{
+		VTYPE zl[32];
+		_loadg(32, zl, &z[column], 16);
+		_reg_forward32(pq, zl, w, sj);
+		_storel(32, &Zt[column], 16, zl);
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	// Independent length-16 rows need no workgroup exchange internally.
+	for (sz_t row = tid; row < 32; row += 16)
+	{
+		VTYPE zl[16];
+		_loadl(16, zl, &Zt[16 * row], 1);
+		_reg_square16(pq, zl, w, 32 * sj + row, 32 * sji + (32 - row - 1));
+		_storel(16, &Zt[16 * row], 1, zl);
+	}
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	for (sz_t column = tid; column < 16; column += 16)
+	{
+		VTYPE zl[32];
+		_loadl(32, zl, &Zt[column], 16);
+		_reg_backward32(pq, zl, w, sji);
+		_storeg(32, &z[column], 16, zl);
+	}
+}
+#endif
+
+#endif // GENEFER_GPU_REGTILE
 
 /*__kernel
 void fwd4x2(__global VTYPE * restrict const zg, __global const uint_32 * restrict const wg)

@@ -51,3 +51,24 @@ mapping oracles plus the Cherub execution recipe.
 
 The authoritative current SHA is the branch ref / PR head. This journal cannot
 contain its own commit hash; later checkpoints will name their parent explicitly.
+
+
+## Checkpoint 2: implementation
+
+Parent: `4eb9c38481a96bdf5fa1e389816d5584e0d79ead`.
+Changed files: `ocl/kernel.cl`, `src/ocl/kernel.h`, `src/engine.h`,
+`src/transformGPU.h`, and this journal.
+
+The three kernels and register-only 16/32-point transform helpers are now
+implemented. Build the host with `-DGENEFER_GPU_REGTILE=1` to opt in; zero is the
+default. Only GFN15--18 non-QVALID square calls use the candidate. Multiplication,
+masked multiplication, carry, other sizes, and QVALID keep their original path.
+Both live and embedded OpenCL sources are synchronized. Device-wide workgroup
+and local-memory limits gate candidate creation; kernel-specific guards follow.
+
+Executed: Clang 18.1.3 OpenCL C 1.2 syntax check for the default GFN16 source
+with opt-in, and GCC C++17 syntax check of the GPU SSE2 host translation unit
+with opt-in. An already available compiler/header installation was reused.
+No OpenCL runtime was invoked. Mathematical and full configuration-matrix
+checks are not complete at this checkpoint. Next action: independent exact
+polynomial-square oracle, staged-vs-register comparisons, and mapping checks.

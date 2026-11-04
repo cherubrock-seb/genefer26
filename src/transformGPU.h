@@ -171,6 +171,7 @@ public:
 		src << "#define N_SZ\t" << n << "u" << std::endl;
 		src << "#define LN_SZ\t" << LN << std::endl;
 		src << "#define VSIZE\t" << VSIZE << std::endl;
+		src << "#define GENEFER_GPU_REGTILE\t" << GENEFER_GPU_REGTILE << std::endl;
 		if (IS32) src << "#define IS32\t" << 1 << std::endl;
 
 		src << "#define P1\t" << (IS32 ? P1U : P1S) << "u" << std::endl;
