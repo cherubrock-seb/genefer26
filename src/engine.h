@@ -45,6 +45,14 @@ public:
 #define CHUNK64		 4	// local size = CHUNK64 * 64 * sizeof(VTYPE) = 4KB, workgroup size = CHUNK64 * 64 / 8 = 32
 #define CHUNK512	 4	// local size = CHUNK512 * 512 * sizeof(VTYPE) = 32KB, workgroup size = CHUNK512 * 512 / 8 = 256
 
+// Experimental GPU path. Hardware correctness and throughput are not established.
+#ifndef GENEFER_GPU_REGTILE
+#define GENEFER_GPU_REGTILE 0
+#endif
+#if GENEFER_GPU_REGTILE != 0 && GENEFER_GPU_REGTILE != 1
+#error "GENEFER_GPU_REGTILE must be 0 or 1"
+#endif
+
 #define CREATE_TRANSFORM_KERNEL(name) _##name = create_transform_kernel(#name);
 #define CREATE_TRANSFORM_KERNELP(name) _##name = create_transform_kernel(#name, false);
 #define CREATE_TRANSFORM_KERNEL_DYN(name, dyn_mem_size) _##name = create_transform_kernel_dyn(#name, dyn_mem_size);
@@ -79,6 +87,9 @@ private:
 	cl_kernel _square16 = nullptr, _square32 = nullptr, _square64 = nullptr;
 #endif
 	cl_kernel _square128 = nullptr, _square256 = nullptr, _square512 = nullptr;
+#if GENEFER_GPU_REGTILE && !defined(QVALID)
+	cl_kernel _square_regtile = nullptr;
+#endif
 	// cl_kernel _fwd4x2 = nullptr, _fwd8 = nullptr;
 #ifdef QVALID
 	cl_kernel _fwd16 = nullptr, _fwd32 = nullptr, _fwd64 = nullptr;
@@ -255,6 +266,19 @@ public:
 		if      (_ln % 3 == 1) { CREATE_TRANSFORM_KERNEL_DYN(square128, 128 * BLK128); }
 		else if (_ln % 3 == 2) { CREATE_TRANSFORM_KERNEL_DYN(square256, 256 * BLK256); }
 		else                   { CREATE_TRANSFORM_KERNEL_DYN(square512, 512 * BLK512); }
+
+#if GENEFER_GPU_REGTILE
+		// The candidate uses 32 work-items and a larger tile allocation. Keep the
+		// original kernel available when the device cannot accommodate the tile.
+		const size_t regtile_words = (_ln % 3 == 0) ? 1024 : 512;
+		if ((_ln >= 15) && (_ln <= 18) && (getMaxWorkGroupSize() >= 32) &&
+			(getLocalMemSize() >= regtile_words * OCL_VSIZE * sizeof(ZP)))
+		{
+			const char * const name = (_ln % 3 == 1) ? "square128_regtile" :
+				((_ln % 3 == 2) ? "square256_regtile" : "square512_regtile");
+			_square_regtile = create_transform_kernel_dyn(name, regtile_words);
+		}
+#endif
 #endif
 
 		// CREATE_TRANSFORM_KERNELP(fwd4x2);
@@ -343,6 +367,20 @@ private:
 		execute_kernel(kernel);
 	}
 
+	void execute_square_kernel(cl_kernel & fallback, const size_t wg_size, const size_t values_per_item)
+	{
+#if GENEFER_GPU_REGTILE && !defined(QVALID)
+		if (_square_regtile != nullptr)
+		{
+			_executeKernel(_square_regtile, 3 * VSIZE / OCL_VSIZE * _n / values_per_item, 32);
+			return;
+		}
+#else
+		(void)values_per_item;
+#endif
+		execute_kernel(fallback, wg_size);
+	}
+
 	void execute_mask_kernel(cl_kernel & kernel, const uint32_t mask)
 	{
 		const uint32 imask = uint32(mask);
@@ -369,9 +407,9 @@ public:
 	void square32() { execute_kernel(_square32, 32 / 8 * BLK32); }
 	void square64() { execute_kernel(_square64, 64 / 8 * BLK64); }
 #else
-	void square128() { execute_kernel(_square128, 128 / 8 * BLK128); }
-	void square256() { execute_kernel(_square256, 256 / 8 * BLK256); }
-	void square512() { execute_kernel(_square512, 512 / 8 * BLK512); }
+	void square128() { execute_square_kernel(_square128, 128 / 8 * BLK128, 16); }
+	void square256() { execute_square_kernel(_square256, 256 / 8 * BLK256, 16); }
+	void square512() { execute_square_kernel(_square512, 512 / 8 * BLK512, 32); }
 #endif
 
 	void forward8p(const int lm, const size_t s)
