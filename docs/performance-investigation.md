@@ -1,80 +1,72 @@
-# CPU FFT specialization investigation
+# CPU small-base specialization investigation
 
-## Ownership and baseline
+## Durable state
 - Repository: `cherubrock-seb/genefer26`.
-- Branch: `perf/cpu-fft-static-recursion`; owned by this engineering session.
-- Fork and upstream baseline: `0e962f8f09f0e4dbdb2acaf76b30bd7aa30a199e` (identical).
-- Starting head: same baseline. The current containing commit is resolved with
-  `git rev-parse HEAD`; later checkpoints record their exact predecessor to avoid
-  claiming a self-referential commit hash.
-- Verified connected identity: `cherubrock-seb`, repository permission: admin.
-- On 2026-11-04, neither fork nor upstream had pull requests; the fork had only
-  `main` before this branch was created.
-- Cherub's separately reported n=15 GPU inner64 experiment is outside this scope.
+- Branch: `perf/cpu-fft-static-recursion` (retained after rejecting that initial hypothesis).
+- Draft PR: https://github.com/cherubrock-seb/genefer26/pull/1
+- Fork/upstream baseline: `0e962f8f09f0e4dbdb2acaf76b30bd7aa30a199e` (identical).
+- Previous checkpoint: `f7cc2be1fe7036f5c07e32e938e2d232f4ec488b`. Resolve the current containing head
+  with `git rev-parse HEAD`.
+- Connected identity/commit attribution: `cherubrock-seb`; admin permission verified.
+- No other fork branches or PRs existed at reconnaissance. Cherub GPU work is
+  outside this CPU branch.
 
-## Hypothesis and invariants
-The hot CPU square calls `square_e/o(z, w, m, sj)` recursively despite all
-transform sizes being compile-time constants. Specializing the recursion by
-`m` may remove runtime branches and address arithmetic and expose smaller leaf
-loops to the compiler. The affected fraction and speedup are NOT yet measured.
-For affected runtime fraction f and local speedup s, the end-to-end upper
-estimate is 1 / (1 - f + f/s). Do not infer a 10% gain without measurements.
+## Decision and hypothesis
+REJECT the initial static-recursion optimization: alternating GCC measurements
+did not establish a repeatable gain. Its prototype remains in Git history.
+The baseline n=15/batch=8 gprof sample placed 57.36% in square_e/o and 24.63% in carry.
 
-Keep butterfly order, twiddle indices, split arithmetic, modular carry,
-duplication masks, roundoff collection, and proof/Gerbicz paths unchanged.
-Start with the square path only. Use the original source as a build-time A/B
-control; revert the optimization if exactness or performance fails.
-Risk: code size, inlining/register pressure, and compiler-specific regressions.
+The replacement specializes batches whose largest base is <= 65536. Normalized
+digits are about b/2, well below half of the 2^20 split. The high component is
+therefore zero. Its FFT, products and carry arithmetic can be removed by the
+compiler while preserving the low-component expressions. Larger or mixed batches
+keep the original split path. This affects most arithmetic, unlike recursion
+overhead. Storage deliberately retains both components for checkpoint compatibility.
 
-## Environment and status
-- Linux x86-64 container; reported CPU AMD EPYC 9V74, AVX-512 available.
-- GCC 13.3.0; 8 CPU quota, 9 exposed logical processors; shared virtual host.
-- No exposed GPU device: no modern GPU performance claim is possible here.
-- Source inspection PASS; compilation, exactness, profiling and timing PENDING.
-- GMP development headers were absent; acquiring matching Ubuntu headers.
-- Files changed at this checkpoint: this journal only.
+Invariants to verify: every active high component remains zero; carry correction
+does not reach the split threshold; masks, signed digits, twiddle order, roundoff
+collection, proof/Gerbicz operations, and saved registers remain compatible.
+Direct construction of the unsplit path rejects larger bases before allocation.
 
-## Experiments and next executable action
-1. Build a bounded whole-square harness with deterministic inputs; save source
-   and binary identity, all bases, n, batch, compiler flags, samples and residues.
-2. Profile the baseline (GCC/gprof if hardware counters are unavailable).
-3. Implement compile-time square recursion only if the profile supports it.
-4. Compare every output limb against baseline and independently against GMP,
-   including heterogeneous bases, n=15..18, batch 8/16/32 and duplicate masks.
-5. Measure alternating A/B whole-square runs, then application quick/proof/
-   certificate flows. Keep benchmark scope explicit if full PRP is too long.
-6. Open a draft PR in this fork; leave integration and GPU claims pending.
+## Files and evidence
+- `src/transformCPU.h`: compile-time high-component accessor, bounded factory dispatch.
+- `test/cpu_square.cpp`: GMP reconstruction of full residues, deterministic dense,
+  sparse and alternating digits, masks, prepared multiplication, timings.
+- `test/run_cpu_square.py`: paired builds, exactness runs, alternating A/B timings,
+  command/compiler/source/binary provenance and incremental JSON output.
+- GCC 13.3, n=15/batch=8/small bases: 72 exact residue checks PASS, plus 72
+  adversarial checks PASS. Baseline/candidate timed hashes and error agree.
+- Preliminary unpaired whole-square timing: baseline 1463.46 us vs candidate
+  1036.31 us (29.2% less time). This is a screening result, NOT a KEEP.
+- Clang 18.1.3, n=18/batch=8/small bases: 72 normal + 72 adversarial checks PASS,
+  maximum observed roundoff 0.0195312.
+- Full n=15..18 / batch=8,16,32 matrix is running. Full application, checkpoint
+  compatibility and alternative ISA checks remain PENDING. No GPU evidence.
 
-Initial probe command (local, not yet executed successfully):
+## Inherited limitations found
+The new oracle also tests large bases outside the optimized domain:
+- GCC baseline and static prototype n=15: all -1 digits, base 1048574, fail
+  at the third square with roundoff 0.5.
+- GCC static prototype n=18: dense input near base 2e9 fails at the first square
+  with roundoff 0.5; a direct unchanged-baseline comparison remains required.
+These are not evidence against the small-base specialization, but prevent any
+blanket all-domain exactness claim. The failing cases remain reproducible with
+the default (large-base) harness and `verify-adversarial`.
+
+## Reproduction and next action
+Host reports AMD EPYC 9V74 with AVX-512, Linux x86-64 virtual machine, 8 CPU quota.
+GMP 6.3 headers and Clang 18.1.3 were extracted from matching Ubuntu packages.
+No BOINC/GPU experiment has been run.
+
 ```sh
-g++ -std=c++17 -O3 -ffinite-math-only -frename-registers \
-  -fprefetch-loop-arrays -mavx512f -mtune=znver3 \
-  -I src -pg probe_cpu.cpp -o probe_cpu_profile
-./probe_cpu_profile 2048
-gprof -b probe_cpu_profile gmon.out
+# Use an installed clang++-18 and libgmp development headers, or add their paths.
+python3 test/run_cpu_square.py \
+  --baseline ../genefer26-baseline --candidate . --output ../matrix-clang \
+  --cxx clang++-18 \
+  --flags '-O3 -ffinite-math-only -ffp-contract=fast -fno-trapping-math -fno-signed-zeros -mavx512f -mtune=znver4' \
+  --repeats 3 --iterations 512 --affinity 0-3
 ```
-The probe is temporary; the reproducible harness will be committed once built.
 
-## Checkpoint 2: buildable candidate and independent oracle
-Predecessor: `06eb660f9b8853ae6c5a9b43642bd561fc75b60f`.
-- Modified `src/transformCPU.h`: square recursion has a compile-time size.
-- Added `test/cpu_square.cpp`: full base-b polynomial reconstruction with GMP,
-  heterogeneous bases, masks, copy/prepared multiplication, and whole-square timing.
-- Baseline gprof (2048 measured + 32 warmup squares, n=15/batch=8): 57.36%
-  sampled time in square_e/o, 24.63% carry. Instrumented timings are not used as
-  performance claims.
-- GCC 13.3 builds PASS; baseline/candidate short-run hashes match at n=15 and 16.
-- Initial timings are noisy and inconclusive; no performance KEEP.
-- New adversarial GMP test FAILS at check 3, lane 3 (base 1048574, all -1 input).
-  Baseline comparison is being run to distinguish an inherited issue from a
-  specialization regression. Do not merge this provisional candidate.
-- Exact build command (matching local GMP headers were extracted to ../deps):
-```sh
-g++ -std=c++17 -O3 -ffinite-math-only -frename-registers \
-  -fprefetch-loop-arrays -mavx512f -mtune=znver3 \
-  -I ../deps/usr/include/x86_64-linux-gnu -I src test/cpu_square.cpp \
-  -l:libgmp.so.10 -o ../cpu_square_candidate15_8
-../cpu_square_candidate15_8 verify
-```
-Next: run this same harness against unmodified baseline headers; diagnose the
-exact full-residue mismatch before further performance work.
+Next: finish and inspect the matrix, then validate checkpoint interchange and
+complete application proof/certificate flows. Run a real n=15 PRP A/B before
+claiming full-application throughput. Leave this PR draft until gates pass.

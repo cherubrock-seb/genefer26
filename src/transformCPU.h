@@ -23,6 +23,10 @@ Please give feedback to the authors if improvement is realized. It is distribute
 namespace arch_namespace
 {
 
+// Retain both components in memory for checkpoint compatibility. For a small
+// base, normalized digits and the final carry correction stay below split / 2,
+// so the high component is zero; making that fact static removes its arithmetic.
+template<bool Split>
 class Complex_8_pair
 {
 private:
@@ -35,56 +39,56 @@ public:
 	finline explicit Complex_8_pair() {}
 	finline explicit Complex_8_pair(const double f) : _l(f), _h(0) {}
 
-	finline void copy_mask(const Complex_8_pair & rhs, const uint32_t mask) { _l.copy_mask(rhs._l, mask); _h.copy_mask(rhs._h, mask); }
+	finline void copy_mask(const Complex_8_pair & rhs, const uint32_t mask) { _l.copy_mask(rhs._l, mask); if constexpr (Split) _h.copy_mask(rhs.high(), mask); else _h = Complex_8(0.0); }
 
 	finline const Complex_8 & low() const { return _l; }
-	finline const Complex_8 & high() const { return _h; }
+	finline decltype(auto) high() const { if constexpr (Split) return (_h); else return Complex_8(0.0); }
 
-	finline Complex_8 get() const { return _l + _h; }
+	finline Complex_8 get() const { return _l + high(); }
 	finline void set(const Complex_8 & rhs)
 	{
-		const Complex_8 h = (rhs * split_inv).round() * Complex_8_pair::split;
+		const Complex_8 h = Split ? (rhs * split_inv).round() * Complex_8_pair::split : Complex_8(0.0);
 		_l = rhs - h; _h = h;
 	}
 
-	finline Complex_8_pair & operator+=(const Complex_8_pair & rhs) { _l += rhs._l; _h += rhs._h; return *this; }
-	finline Complex_8_pair & operator-=(const Complex_8_pair & rhs) { _l -= rhs._l; _h -= rhs._h; return *this; }
-	finline Complex_8_pair & operator*=(const double rhs) { _l *= rhs; _h *= rhs; return *this; }
-	finline Complex_8_pair & operator*=(const Double_8 & rhs) { _l *= rhs; _h *= rhs; return *this; }
+	finline Complex_8_pair & operator+=(const Complex_8_pair & rhs) { _l += rhs._l; _h = high() + rhs.high(); return *this; }
+	finline Complex_8_pair & operator-=(const Complex_8_pair & rhs) { _l -= rhs._l; _h = high() - rhs.high(); return *this; }
+	finline Complex_8_pair & operator*=(const double rhs) { _l *= rhs; _h = high() * rhs; return *this; }
+	finline Complex_8_pair & operator*=(const Double_8 & rhs) { _l *= rhs; _h = high() * rhs; return *this; }
 
-	finline Complex_8_pair operator+(const Complex_8_pair & rhs) const { return Complex_8_pair(_l + rhs._l, _h + rhs._h); }
-	finline Complex_8_pair operator-(const Complex_8_pair & rhs) const { return Complex_8_pair(_l - rhs._l, _h - rhs._h); }
-	finline Complex_8_pair operator*(const double rhs) const { return Complex_8_pair(_l * rhs, _h * rhs); }
-	finline Complex_8_pair operator*(const Double_8 & rhs) const { return Complex_8_pair(_l * rhs, _h * rhs); }
-	finline Complex_8_pair addi(const Complex_8_pair & rhs) const { return Complex_8_pair(_l.addi(rhs._l), _h.addi(rhs._h)); }
-	finline Complex_8_pair subi(const Complex_8_pair & rhs) const { return Complex_8_pair(_l.subi(rhs._l), _h.subi(rhs._h)); }
-	// finline Complex_8_pair muli() const { return Complex_8_pair(_l.muli(), _h.muli()); }
+	finline Complex_8_pair operator+(const Complex_8_pair & rhs) const { return Complex_8_pair(_l + rhs._l, high() + rhs.high()); }
+	finline Complex_8_pair operator-(const Complex_8_pair & rhs) const { return Complex_8_pair(_l - rhs._l, high() - rhs.high()); }
+	finline Complex_8_pair operator*(const double rhs) const { return Complex_8_pair(_l * rhs, high() * rhs); }
+	finline Complex_8_pair operator*(const Double_8 & rhs) const { return Complex_8_pair(_l * rhs, high() * rhs); }
+	finline Complex_8_pair addi(const Complex_8_pair & rhs) const { return Complex_8_pair(_l.addi(rhs._l), high().addi(rhs.high())); }
+	finline Complex_8_pair subi(const Complex_8_pair & rhs) const { return Complex_8_pair(_l.subi(rhs._l), high().subi(rhs.high())); }
+	// finline Complex_8_pair muli() const { return Complex_8_pair(_l.muli(), high().muli()); }
 
-	finline Complex_8_pair mulTF_0() const { return Complex_8_pair(_l.mulTF_0(), _h.mulTF_0()); }
-	finline Complex_8_pair mulTFconj_0() const { return Complex_8_pair(_l.mulTFconj_0(), _h.mulTFconj_0()); }
-	finline Complex_8_pair mulTF(const TwiddleFactor & rhs) const { return Complex_8_pair(_l.mulTF(rhs), _h.mulTF(rhs)); }
-	finline Complex_8_pair mulTFconj(const TwiddleFactor & rhs) const { return Complex_8_pair(_l.mulTFconj(rhs), _h.mulTFconj(rhs)); }
-	finline Complex_8_pair mulTFconji(const TwiddleFactor & rhs) const { return Complex_8_pair(_l.mulTFconji(rhs), _h.mulTFconji(rhs)); }
+	finline Complex_8_pair mulTF_0() const { return Complex_8_pair(_l.mulTF_0(), high().mulTF_0()); }
+	finline Complex_8_pair mulTFconj_0() const { return Complex_8_pair(_l.mulTFconj_0(), high().mulTFconj_0()); }
+	finline Complex_8_pair mulTF(const TwiddleFactor & rhs) const { return Complex_8_pair(_l.mulTF(rhs), high().mulTF(rhs)); }
+	finline Complex_8_pair mulTFconj(const TwiddleFactor & rhs) const { return Complex_8_pair(_l.mulTFconj(rhs), high().mulTFconj(rhs)); }
+	finline Complex_8_pair mulTFconji(const TwiddleFactor & rhs) const { return Complex_8_pair(_l.mulTFconji(rhs), high().mulTFconji(rhs)); }
 
-	finline Complex_8_pair sqr() const { return Complex_8_pair(_l.sqr(), _l.mul(_h + _h) + _h.sqr()); }
-	finline Complex_8_pair mul(const Complex_8_pair & rhs) const { return Complex_8_pair(_l.mul(rhs._l), _l.mul(rhs._h) + _h.mul(rhs.get())); }
+	finline Complex_8_pair sqr() const { return Complex_8_pair(_l.sqr(), _l.mul(high() + high()) + high().sqr()); }
+	finline Complex_8_pair mul(const Complex_8_pair & rhs) const { return Complex_8_pair(_l.mul(rhs._l), _l.mul(rhs.high()) + high().mul(rhs.get())); }
 
-	finline Complex_8_pair mul_mask(const Complex_8_pair & rhs, const uint32_t mask) const { return Complex_8_pair(_l.mul_mask(rhs._l, mask), _l.mul_maskz(rhs._h, mask) + _h.mul_mask(rhs.get(), mask)); }
-	finline Complex_8_pair mul_maskz(const Complex_8_pair & rhs, const uint32_t mask) const { return Complex_8_pair(_l.mul_maskz(rhs._l, mask), _l.mul_maskz(rhs._h, mask) + _h.mul_maskz(rhs.get(), mask)); }
+	finline Complex_8_pair mul_mask(const Complex_8_pair & rhs, const uint32_t mask) const { return Complex_8_pair(_l.mul_mask(rhs._l, mask), _l.mul_maskz(rhs.high(), mask) + high().mul_mask(rhs.get(), mask)); }
+	finline Complex_8_pair mul_maskz(const Complex_8_pair & rhs, const uint32_t mask) const { return Complex_8_pair(_l.mul_maskz(rhs._l, mask), _l.mul_maskz(rhs.high(), mask) + high().mul_maskz(rhs.get(), mask)); }
 
-	finline Complex_8_pair flatten() const { return Complex_8_pair(_l, _h * split_inv); }
-	finline Complex_8_pair elevate() const { return Complex_8_pair(_l, _h * split); }
+	finline Complex_8_pair flatten() const { return Complex_8_pair(_l, high() * split_inv); }
+	finline Complex_8_pair elevate() const { return Complex_8_pair(_l, high() * split); }
 
-	finline Complex_8_pair round() const { return Complex_8_pair(_l.round(), _h.round()); }
-	finline Complex_8_pair abs() const { return Complex_8_pair(_l.abs(), _h.abs()); }
-	finline Complex_8_pair max(const Complex_8_pair & rhs) const { return Complex_8_pair(_l.max(rhs._l), _h.max(rhs._h)); }
-	finline Complex_8 max() const { return _l.max(_h); }
+	finline Complex_8_pair round() const { return Complex_8_pair(_l.round(), high().round()); }
+	finline Complex_8_pair abs() const { return Complex_8_pair(_l.abs(), high().abs()); }
+	finline Complex_8_pair max(const Complex_8_pair & rhs) const { return Complex_8_pair(_l.max(rhs._l), high().max(rhs.high())); }
+	finline Complex_8 max() const { return _l.max(high()); }
 
-	finline Complex_8_pair shift() const { return Complex_8_pair(_l.shift(), _h.shift()); }
+	finline Complex_8_pair shift() const { return Complex_8_pair(_l.shift(), high().shift()); }
 
 	finline Complex_8 mod(const Double_8 & m, const Double_8 & m_inv)
 	{
-		const Complex_8 h_m = (_h * m_inv).round(), rh_m = _h.submul(h_m, m);
+		const Complex_8 h_m = (high() * m_inv).round(), rh_m = high().submul(h_m, m);
 		_h = h_m;
 
 		const Complex_8 l_m = (_l * m_inv).round(), rl_m = _l.submul(l_m, m) + rh_m * split;
@@ -405,9 +409,10 @@ public:
 	}
 };
 
-template<size_t VSIZE, size_t N>
+template<size_t VSIZE, size_t N, bool Split = true>
 class transformCPU : public transform<VSIZE>
 {
+	using Complex_8_pair = arch_namespace::Complex_8_pair<Split>;
 	using parent = transform<VSIZE>;
 	using Par = parallel<transformCPU>;
 
@@ -416,6 +421,15 @@ class transformCPU : public transform<VSIZE>
 	using u64vec = SVint<UInt64_8, VSIZE / 8>;
 
 private:
+	static const bvec & checked_base(const bvec & b)
+	{
+		if constexpr (!Split)
+		{
+			if (b.max() > 65536) throw std::runtime_error("unsplit CPU transform requires bases <= 65536");
+		}
+		return b;
+	}
+
 	const size_t _num_regs;
 	Par _parallel;
 	TwiddleFactor * const _w;
@@ -427,7 +441,7 @@ private:
 	size_t _im_src, _c_src, _c_dst, _cm_src, _cm_dst, _cm_mask;
 
 public:
-	transformCPU(const bvec & b, const int n, const size_t num_regs) : transform<VSIZE>(b, n, parent::EKind::CPU),
+	transformCPU(const bvec & b, const int n, const size_t num_regs) : transform<VSIZE>(checked_base(b), n, parent::EKind::CPU),
 		_num_regs(num_regs), _parallel(this, VSIZE / 8 - 1),
 		_w(static_cast<TwiddleFactor *>(align_new(N / 2 * sizeof(TwiddleFactor), sizeof(TwiddleFactor)))),
 		_mem(static_cast<Complex_8_pair *>(align_new((VSIZE / 8) * (num_regs + 1) * N * sizeof(Complex_8_pair), 2 * 1024 * 1024)))
@@ -501,23 +515,20 @@ private:
 		for (size_t k = 0; k < N / 4; ++k) Complex_8_pair::forward4_0(&z[k], N / 4);
 	}
 
-	// The transform geometry is fixed. Keep each butterfly in the original order
-	// while exposing leaf sizes and strides to the compiler.
-	template<size_t m>
-	static void square_e(Complex_8_pair * const z, const TwiddleFactor * const w, const size_t sj)
+	static void square_e(Complex_8_pair * const z, const TwiddleFactor * const w, const size_t m, const size_t sj)
 	{
 		const TwiddleFactor w1 = w[sj], w20 = w[2 * sj + 0];
 
 		for (size_t i = 0; i < m; ++i) Complex_8_pair::forward4e(&z[i], m, w1, w20);
 
-		if constexpr (m > 4)
+		if (m > 4)
 		{
-			square_e<m / 4>(&z[0 * m], w, 4 * sj + 0);
-			square_o<m / 4>(&z[1 * m], w, 4 * sj + 0);
-			square_e<m / 4>(&z[2 * m], w, 4 * sj + 1);
-			square_o<m / 4>(&z[3 * m], w, 4 * sj + 1);
+			square_e(&z[0 * m], w, m / 4, 4 * sj + 0);
+			square_o(&z[1 * m], w, m / 4, 4 * sj + 0);
+			square_e(&z[2 * m], w, m / 4, 4 * sj + 1);
+			square_o(&z[3 * m], w, m / 4, 4 * sj + 1);
 		}
-		else if constexpr (m == 4)
+		else if (m == 4)
 		{
 			const TwiddleFactor w40 = w[4 * sj + 0], w41 = w[4 * sj + 1];
 
@@ -535,21 +546,20 @@ private:
 		for (size_t i = 0; i < m; ++i) Complex_8_pair::backward4e(&z[i], m, w1, w20);
 	}
 
-	template<size_t m>
-	static void square_o(Complex_8_pair * const z, const TwiddleFactor * const w, const size_t sj)
+	static void square_o(Complex_8_pair * const z, const TwiddleFactor * const w, const size_t m, const size_t sj)
 	{
 		const TwiddleFactor w1 = w[sj], w21 = w[2 * sj + 1];
 
 		for (size_t i = 0; i < m; ++i) Complex_8_pair::forward4o(&z[i], m, w1, w21);
 
-		if constexpr (m > 4)
+		if (m > 4)
 		{
-			square_e<m / 4>(&z[0 * m], w, 4 * sj + 2);
-			square_o<m / 4>(&z[1 * m], w, 4 * sj + 2);
-			square_e<m / 4>(&z[2 * m], w, 4 * sj + 3);
-			square_o<m / 4>(&z[3 * m], w, 4 * sj + 3);
+			square_e(&z[0 * m], w, m / 4, 4 * sj + 2);
+			square_o(&z[1 * m], w, m / 4, 4 * sj + 2);
+			square_e(&z[2 * m], w, m / 4, 4 * sj + 3);
+			square_o(&z[3 * m], w, m / 4, 4 * sj + 3);
 		}
-		else if constexpr (m == 4)
+		else if (m == 4)
 		{
 			const TwiddleFactor w42 = w[4 * sj + 2], w43 = w[4 * sj + 3];
 
@@ -800,10 +810,10 @@ public:
 		Complex_8_pair * const z = &_mem[_num_regs * N * thread_id];
 
 		forward4_0(z);
-		square_e<N / 16>(&z[0 * (N / 4)], w, 4 + 0);
-		square_o<N / 16>(&z[1 * (N / 4)], w, 4 + 0);
-		square_e<N / 16>(&z[2 * (N / 4)], w, 4 + 1);
-		square_o<N / 16>(&z[3 * (N / 4)], w, 4 + 1);
+		square_e(&z[0 * (N / 4)], w, N / 16, 4 + 0);
+		square_o(&z[1 * (N / 4)], w, N / 16, 4 + 0);
+		square_e(&z[2 * (N / 4)], w, N / 16, 4 + 1);
+		square_o(&z[3 * (N / 4)], w, N / 16, 4 + 1);
 		_err_array[thread_id] = backward4_0_carry(z, _base[thread_id], _base_inv[thread_id], (_sq_dup >> (8 * thread_id)) & 0xff);
 	}
 
@@ -967,24 +977,33 @@ public:
 #endif
 };
 
-template<size_t VSIZE>
-inline transform<VSIZE> * create_transformCPU(const b_vec<VSIZE / 8> & b, const int n, const size_t num_regs)
+template<size_t VSIZE, bool Split>
+inline transform<VSIZE> * create_transformCPU_impl(const b_vec<VSIZE / 8> & b, const int n, const size_t num_regs)
 {
 	transform<VSIZE> * ptransform = nullptr;
 #ifdef QVALID
-	if      (n == 10) ptransform = new transformCPU<VSIZE, (1 <<  9)>(b, n, num_regs);
-	else if (n == 11) ptransform = new transformCPU<VSIZE, (1 << 10)>(b, n, num_regs);
-	else if (n == 12) ptransform = new transformCPU<VSIZE, (1 << 11)>(b, n, num_regs);
+	if      (n == 10) ptransform = new transformCPU<VSIZE, (1 <<  9), Split>(b, n, num_regs);
+	else if (n == 11) ptransform = new transformCPU<VSIZE, (1 << 10), Split>(b, n, num_regs);
+	else if (n == 12) ptransform = new transformCPU<VSIZE, (1 << 11), Split>(b, n, num_regs);
 #else
 	// if      (n == 13) ptransform = new transformCPU<VSIZE, (1 << 12)>(b, n, num_regs);
 	// else if (n == 14) ptransform = new transformCPU<VSIZE, (1 << 13)>(b, n, num_regs);
-	if      (n == 15) ptransform = new transformCPU<VSIZE, (1 << 14)>(b, n, num_regs);
-	else if (n == 16) ptransform = new transformCPU<VSIZE, (1 << 15)>(b, n, num_regs);
-	else if (n == 17) ptransform = new transformCPU<VSIZE, (1 << 16)>(b, n, num_regs);
-	else if (n == 18) ptransform = new transformCPU<VSIZE, (1 << 17)>(b, n, num_regs);
+	if      (n == 15) ptransform = new transformCPU<VSIZE, (1 << 14), Split>(b, n, num_regs);
+	else if (n == 16) ptransform = new transformCPU<VSIZE, (1 << 15), Split>(b, n, num_regs);
+	else if (n == 17) ptransform = new transformCPU<VSIZE, (1 << 16), Split>(b, n, num_regs);
+	else if (n == 18) ptransform = new transformCPU<VSIZE, (1 << 17), Split>(b, n, num_regs);
 #endif
 	if (ptransform == nullptr) throw std::runtime_error("exponent is not supported");
 	return ptransform;
+}
+
+template<size_t VSIZE>
+inline transform<VSIZE> * create_transformCPU(const b_vec<VSIZE / 8> & b, const int n, const size_t num_regs)
+{
+	// Use one representation for the entire batch. Larger or mixed batches retain
+	// the original split arithmetic. The conservative limit leaves carry headroom.
+	if (b.max() <= 65536) return create_transformCPU_impl<VSIZE, false>(b, n, num_regs);
+	return create_transformCPU_impl<VSIZE, true>(b, n, num_regs);
 }
 
 }

@@ -26,9 +26,14 @@ static_assert(TEST_BATCH == 8 || TEST_BATCH == 16 || TEST_BATCH == 32, "unsuppor
 constexpr size_t lanes = TEST_BATCH, digits = size_t(1) << TEST_N;
 using Digit = SVint<Int32_8, lanes / 8>;
 using Base = b_vec<lanes / 8>;
-class TestTransform : public cpu_square_test::transformCPU<lanes, digits / 2>
+#ifdef TEST_UNSPLIT
+using TestedTransform = cpu_square_test::transformCPU<lanes, digits / 2, false>;
+#else
+using TestedTransform = cpu_square_test::transformCPU<lanes, digits / 2>;
+#endif
+class TestTransform : public TestedTransform
 {
-    using Parent = cpu_square_test::transformCPU<lanes, digits / 2>;
+    using Parent = TestedTransform;
 public:
     explicit TestTransform(const Base & base) : Parent(base, TEST_N, 3) {}
     using Parent::getZi;
@@ -73,8 +78,12 @@ static void evaluate(mpz_t out, const std::vector<Digit> & input, size_t lane,
 static Base make_bases()
 {
     // Small bases, the split boundary, large bases, and the accepted upper bound.
+#ifdef TEST_SMALL_BASE
+    const uint32_t values[8] = {10000, 10002, 16382, 32766, 32770, 49150, 65532, 65534};
+#else
     const uint32_t values[8] = {10000, 10002, 65534, 1048574, 1048578,
                                999999998, 1999999998, 2000000000};
+#endif
     Base base;
     for (size_t group = 0; group < lanes / 8; ++group) base[group] = UInt32_8(values);
     return base;
@@ -86,7 +95,7 @@ static uint64_t next_random(uint64_t & state)
     return state;
 }
 
-static int verify()
+static int verify(bool adversarial)
 {
     const Base base = make_bases();
     TestTransform transform(base);
@@ -102,7 +111,7 @@ static int verify()
                 values[j] = static_cast<int32_t>(next_random(random) % uint32_t(b)) - b / 2;
                 if (j == 1) values[j] = (k & 1) ? b / 2 - 1 : -b / 2;
                 if (j == 2) values[j] = (k == 0 || k == digits - 1) ? b / 2 - 1 : 0;
-                if (j == 3) values[j] = -1;
+                if (adversarial && j == 3) values[j] = -1;
             }
             input[k][group] = Int32_8(values);
         }
@@ -128,8 +137,13 @@ static int verify()
             evaluate(actual.value, output, lane, 0, TEST_N, powers[lane]);
             mpz_mod(actual.value, actual.value, modulus[lane].value);
             if (mpz_cmp(actual.value, expected[lane].value) != 0)
+            {
+                mpz_sub(actual.value, actual.value, expected[lane].value);
+                std::cerr << "roundoff=" << transform.get_error() << ", difference bits="
+                          << mpz_sizeinbase(actual.value, 2) << '\n';
                 throw std::runtime_error("GMP residue mismatch at check " + std::to_string(checks) +
                                          ", lane " + std::to_string(lane));
+            }
         }
         if (!std::isfinite(transform.get_error()) || transform.get_error() >= 0.5)
             throw std::runtime_error("roundoff limit exceeded");
@@ -169,7 +183,12 @@ static int verify()
 
 static int bench(size_t iterations)
 {
-    Base base; base.init(1000000000, 2, 2);
+    Base base;
+#ifdef TEST_SMALL_BASE
+    base.init(65534, 2, 2);
+#else
+    base.init(1000000000, 2, 2);
+#endif
     TestTransform transform(base);
     transform.set(3);
     for (size_t i = 0; i < 32; ++i) transform.square_dup((i & 1) ? 0x55555555U : 0xaaaaaaaaU);
@@ -195,7 +214,8 @@ int main(int argc, char **argv)
 {
     try
     {
-        if (argc == 2 && std::string(argv[1]) == "verify") return verify();
+        if (argc == 2 && std::string(argv[1]) == "verify") return verify(false);
+        if (argc == 2 && std::string(argv[1]) == "verify-adversarial") return verify(true);
         if (argc == 3 && std::string(argv[1]) == "bench")
         {
             const std::string value = argv[2];
@@ -205,7 +225,7 @@ int main(int argc, char **argv)
             if (count == 0 || count > 1000000) throw std::runtime_error("iterations must be in [1, 1000000]");
             return bench(count);
         }
-        std::cerr << "Usage: cpu_square verify | bench ITERATIONS\n";
+        std::cerr << "Usage: cpu_square verify | verify-adversarial | bench ITERATIONS\n";
     }
     catch (const std::exception & e) { std::cerr << e.what() << '\n'; }
     return 1;
