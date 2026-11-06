@@ -222,6 +222,9 @@ public:
 		src << "#define BLK32\t" << BLK32 << std::endl;
 		src << "#define BLK64\t" << BLK64 << std::endl;
 		src << "#define BLK128\t" << BLK128 << std::endl;
+		const bool use_sq128_pad16_nvidia = _engine->use_sq128_pad16_nvidia();
+		src << "#define SQ128_PAD_GROUP\t" << (use_sq128_pad16_nvidia ? 16u : 0u) << "u" << std::endl;
+		src << "#define SQ128_PAD_SLOTS\t" << (use_sq128_pad16_nvidia ? 136u : 128u) << "u" << std::endl;
 		src << "#define BLK256\t" << BLK256 << std::endl;
 		src << "#define BLK512\t" << BLK512 << std::endl;
 		src << "#define CHUNK64\t" << CHUNK64 << std::endl;
