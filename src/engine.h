@@ -54,6 +54,10 @@ public:
 #endif
 #endif
 
+#ifndef GENEFER_GPU_CARRY_SHIFT5_NVIDIA_GFN16
+#define GENEFER_GPU_CARRY_SHIFT5_NVIDIA_GFN16 0u
+#endif
+
 #define BLK256		 1
 #define BLK512		 1	// local size = BLK512 * 512 * sizeof(VTYPE) = 8KB, workgroup size = BLK512 * 512 / 8 = 64
 #define CHUNK64		 4	// local size = CHUNK64 * 64 * sizeof(VTYPE) = 4KB, workgroup size = CHUNK64 * 64 / 8 = 32
@@ -120,7 +124,13 @@ private:
 public:
 	engine(const platform & platform, const size_t device_id, const int ln, const bool is_boinc, const size_t num_regs)
 		: device(platform, device_id), _n(size_t(1) << ln), _ln(ln), _is_boinc(is_boinc), _num_regs(num_regs),
+#if GENEFER_GPU_CARRY_SHIFT5_NVIDIA_GFN16
+		_carry_shift(((ln == 16) && isNVIDIA())
+			? 5
+			: ilog2_32(uint32_t(std::min(_n / CARRY_LENGTH, std::min(size_t(256), getMaxWorkGroupSize())) / OCL_VSIZE)) ) {}
+#else
 		_carry_shift(ilog2_32(uint32_t(std::min(_n / CARRY_LENGTH, std::min(size_t(256), getMaxWorkGroupSize())) / OCL_VSIZE))) {}
+#endif
 	virtual ~engine() {}
 
 	int get_carry_shift() const { return _carry_shift; }

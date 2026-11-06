@@ -57,3 +57,56 @@ Correctness:
 Arithmetic, twiddles, and workgroup geometry are unchanged. Performance claims
 apply only to the tested hardware and workload; this remains a default-off
 experimental path.
+
+## NVIDIA GFN16 carry-shift5 composition
+
+A second default-off experiment can be composed with the square128 pad16 path:
+
+```
+-DGENEFER_GPU_CARRY_SHIFT5_NVIDIA_GFN16=1
+```
+
+When enabled, carry shift 5 is selected only when the runtime device is NVIDIA
+and `ln == 16`. Radeon and every non-GFN16 length retain the canonical carry
+shift calculation. The square128 pad16 selector remains independent and
+default-off.
+
+### Composition validation
+
+RTX 3080 event-timing census, six fully position-balanced three-way triplets:
+
+- existing PR3 pad16 versus canonical: **+4.5328%** total
+- pad16 plus carry-shift5 versus canonical: **+5.7856%** total
+- carry-shift5 incremental versus PR3: **+1.1984%** total
+- carry1 incremental versus PR3: **+6.7052%**
+- all six matched total and carry1 comparisons were positive
+
+Final runtime-gated confirmation on RTX 3080:
+
+- total event timing: **+1.4740%** incremental versus PR3
+- carry1 event timing: **+7.5506%**
+- all three matched event pairs were positive
+
+Radeon VII canonical-fallback confirmation:
+
+- total event delta: **+0.8523%**
+- carry1 event delta: **-0.6420%**
+- classified as neutral fallback under the validation gate
+- GFN16 production results matched PR3 exactly for all eight tested bases
+
+Production RTX GFN16 wall-clock confirmation versus PR3 over three
+counterbalanced eight-base pairs:
+
+- median incremental speedup: **+0.5808%**
+- pair speedups: **+0.2689%, +0.5808%, +0.7476%**
+- all three pairs were positive
+- candidate wall-time spread: **0.1573%**
+- all result rows matched pairwise
+
+Change-surface correctness also reused exact RTX PR3-versus-candidate matches at
+GFN15 and GFN16. GFN17/GFN18 were not rerun because the carry selector is
+source-gated to `ln == 16`; those lengths retain the canonical carry path.
+
+Both experimental selectors remain default-off. Performance claims apply only
+to the measured hardware and workloads.
+

@@ -14,6 +14,10 @@ kernel = (ROOT / "ocl/kernel.cl").read_text()
 header = (ROOT / "src/ocl/kernel.h").read_text()
 
 assert "#define GENEFER_GPU_SQ128_PAD16_NVIDIA 0u" in engine
+assert "#define GENEFER_GPU_CARRY_SHIFT5_NVIDIA_GFN16 0u" in engine
+assert "#if GENEFER_GPU_CARRY_SHIFT5_NVIDIA_GFN16" in engine
+assert "(ln == 16) && isNVIDIA()" in engine
+assert "? 5" in engine
 assert "bool isNVIDIA() const" in ocl
 assert "use_sq128_pad16_nvidia()" in engine
 assert "get_square128_local_slots()" in engine
