@@ -109,4 +109,3 @@ source-gated to `ln == 16`; those lengths retain the canonical carry path.
 
 Both experimental selectors remain default-off. Performance claims apply only
 to the measured hardware and workloads.
-
