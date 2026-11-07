@@ -497,6 +497,215 @@ INLINE void _mul8r_1(const uint2_32 pq, uint_32 z[8], const uint_32 zp[8],
 	const uint_32 w1 = w[sj], wi1 = w[sji]; \
 	DECLARE_W2I2();
 
+
+#if defined(SQ128_PAD_GROUP) && (SQ128_PAD_GROUP != 0)
+
+INLINE sz_t sq128_pad_index(const sz_t i)
+{
+	return i + i / SQ128_PAD_GROUP;
+}
+
+INLINE void sq128_loadl(
+	const sz_t n,
+	VTYPE * const zl,
+	__local const VTYPE * restrict const Z,
+	const sz_t logical_base,
+	const sz_t logical_stride)
+{
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	for (sz_t l = 0; l < n; ++l)
+		zl[l] = Z[
+			sq128_pad_index(
+				logical_base + l * logical_stride
+			)
+		];
+}
+
+INLINE void sq128_storel(
+	const sz_t n,
+	__local VTYPE * restrict const Z,
+	const sz_t logical_base,
+	const sz_t logical_stride,
+	const VTYPE * const zl)
+{
+	for (sz_t l = 0; l < n; ++l)
+		Z[
+			sq128_pad_index(
+				logical_base + l * logical_stride
+			)
+		] = zl[l];
+}
+
+INLINE void forward8i_sq128_pad(
+	const uint2_32 pq,
+	const sz_t logical_base,
+	const sz_t local_stride,
+	__local VTYPE * restrict const Z,
+	const sz_t global_stride,
+	__global VTYPE * restrict const z,
+	__global const uint_32 * restrict const w,
+	const sz_t sj)
+{
+	DECLARE_W124();
+	LOADG(global_stride);
+
+	_forward8(
+		pq,
+		zl,
+		w1,
+		w2,
+		w4
+	);
+
+	sq128_storel(
+		8,
+		Z,
+		logical_base,
+		local_stride,
+		zl
+	);
+}
+
+INLINE void forward8l_sq128_pad(
+	const uint2_32 pq,
+	const sz_t logical_base,
+	const sz_t local_stride,
+	__local VTYPE * restrict const Z,
+	__global const uint_32 * restrict const w,
+	const sz_t sj)
+{
+	DECLARE_W124();
+	VTYPE zl[8];
+
+	sq128_loadl(
+		8,
+		zl,
+		Z,
+		logical_base,
+		local_stride
+	);
+
+	_forward8(
+		pq,
+		zl,
+		w1,
+		w2,
+		w4
+	);
+
+	sq128_storel(
+		8,
+		Z,
+		logical_base,
+		local_stride,
+		zl
+	);
+}
+
+INLINE void square2x4l_sq128_pad(
+	const uint2_32 pq,
+	const sz_t logical_base,
+	__local VTYPE * restrict const Z,
+	__global const uint_32 * restrict const w,
+	const sz_t sj)
+{
+	const uint2_32 w2 = _load2g(w, sj);
+	VTYPE zl[8];
+
+	sq128_loadl(
+		8,
+		zl,
+		Z,
+		logical_base,
+		1
+	);
+
+	_square2x4(
+		pq,
+		zl,
+		w2
+	);
+
+	sq128_storel(
+		8,
+		Z,
+		logical_base,
+		1,
+		zl
+	);
+}
+
+INLINE void backward8l_sq128_pad(
+	const uint2_32 pq,
+	const sz_t logical_base,
+	const sz_t local_stride,
+	__local VTYPE * restrict const Z,
+	__global const uint_32 * restrict const w,
+	const sz_t sji)
+{
+	DECLARE_WI124();
+	VTYPE zl[8];
+
+	sq128_loadl(
+		8,
+		zl,
+		Z,
+		logical_base,
+		local_stride
+	);
+
+	_backward8r(
+		pq,
+		zl,
+		wi1,
+		wi2r,
+		wi4r
+	);
+
+	sq128_storel(
+		8,
+		Z,
+		logical_base,
+		local_stride,
+		zl
+	);
+}
+
+INLINE void backward8o_sq128_pad(
+	const uint2_32 pq,
+	const sz_t global_stride,
+	__global VTYPE * restrict const z,
+	const sz_t logical_base,
+	const sz_t local_stride,
+	__local VTYPE * restrict const Z,
+	__global const uint_32 * restrict const w,
+	const sz_t sji)
+{
+	DECLARE_WI124();
+	VTYPE zl[8];
+
+	sq128_loadl(
+		8,
+		zl,
+		Z,
+		logical_base,
+		local_stride
+	);
+
+	_backward8r(
+		pq,
+		zl,
+		wi1,
+		wi2r,
+		wi4r
+	);
+
+	STOREG(global_stride);
+}
+
+#endif
+
 INLINE void forward8g(const uint2_32 pq, const sz_t m, __global VTYPE * restrict const z,
 	__global const uint_32 * restrict const w, const sz_t sj)
 {
@@ -979,14 +1188,122 @@ void square64(__global VTYPE * restrict const zg, __global const uint_32 * restr
 __kernel __attribute__((reqd_work_group_size(128 / 8 * BLK128, 1, 1)))
 void square128(__global VTYPE * restrict const zg, __global const uint_32 * restrict const wg, __local VTYPE * const Z)
 {
-	DECLARE_VAR_SQRMUL(128, BLK128);
-	const sz_t k2 = 7 * (vid & ~(2 - 1)) + vid, k16 = 7 * (vid & ~(16 - 1)) + vid;
+#if defined(SQ128_PAD_GROUP) && (SQ128_PAD_GROUP != 0)
+	DECLARE_VAR_REG();
 
-	forward8i(pq, 16, &Zb[k16 % 128], 16, &z[k16], w, (s + j) / 16);
-	forward8l(pq, 2, &Zb[k2 % 128], w, (s + j) / 2);
-	square2x4l(pq, &Zb[k % 128], w, s + j);
-	backward8l(pq, 2, &Zb[k2 % 128], w, (s + ji) / 2);
-	backward8o(pq, 16, &z[k16], 16, &Zb[k16 % 128], w, (s + ji) / 16);
+	const sz_t block_id = (vid / (128 / 8)) % BLK128;
+	__local VTYPE * const Zb = &Z[SQ128_PAD_SLOTS * block_id];
+
+	const sz_t s = N_SZ / 8;
+	const sz_t j = id;
+	const sz_t ji = s - j - 1;
+	const sz_t k = 8 * vid;
+
+	const sz_t k2 =
+		7 * (vid & ~(2 - 1)) + vid;
+
+	const sz_t k16 =
+		7 * (vid & ~(16 - 1)) + vid;
+
+	forward8i_sq128_pad(
+		pq,
+		k16 % 128,
+		16,
+		Zb,
+		16,
+		&z[k16],
+		w,
+		(s + j) / 16
+	);
+
+	forward8l_sq128_pad(
+		pq,
+		k2 % 128,
+		2,
+		Zb,
+		w,
+		(s + j) / 2
+	);
+
+	square2x4l_sq128_pad(
+		pq,
+		k % 128,
+		Zb,
+		w,
+		s + j
+	);
+
+	backward8l_sq128_pad(
+		pq,
+		k2 % 128,
+		2,
+		Zb,
+		w,
+		(s + ji) / 2
+	);
+
+	backward8o_sq128_pad(
+		pq,
+		16,
+		&z[k16],
+		k16 % 128,
+		16,
+		Zb,
+		w,
+		(s + ji) / 16
+	);
+#else
+	DECLARE_VAR_SQRMUL(128, BLK128);
+
+	const sz_t k2 =
+		7 * (vid & ~(2 - 1)) + vid;
+
+	const sz_t k16 =
+		7 * (vid & ~(16 - 1)) + vid;
+
+	forward8i(
+		pq,
+		16,
+		&Zb[k16 % 128],
+		16,
+		&z[k16],
+		w,
+		(s + j) / 16
+	);
+
+	forward8l(
+		pq,
+		2,
+		&Zb[k2 % 128],
+		w,
+		(s + j) / 2
+	);
+
+	square2x4l(
+		pq,
+		&Zb[k % 128],
+		w,
+		s + j
+	);
+
+	backward8l(
+		pq,
+		2,
+		&Zb[k2 % 128],
+		w,
+		(s + ji) / 2
+	);
+
+	backward8o(
+		pq,
+		16,
+		&z[k16],
+		16,
+		&Zb[k16 % 128],
+		w,
+		(s + ji) / 16
+	);
+#endif
 }
 
 #elif (LN_SZ % 3 == 2)

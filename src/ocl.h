@@ -318,6 +318,7 @@ public:
 	size_t getTimerResolution() const { return _timerResolution; }
 	size_t getMaxMemAllocSize() const { return _maxMemAllocSize; }
 	const std::string getType() const { return _type; }
+	bool isNVIDIA() const { return _vendor == EVendor::NVIDIA; }
 
 private:
 	static EVendor getVendor(const std::string & vendorString)

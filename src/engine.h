@@ -40,6 +40,24 @@ public:
 #define BLK32		 8
 #define BLK64		 4
 #define BLK128		 2
+
+#ifndef GENEFER_GPU_SQ128_PAD16_NVIDIA
+#define GENEFER_GPU_SQ128_PAD16_NVIDIA 0u
+#endif
+
+#if GENEFER_GPU_SQ128_PAD16_NVIDIA
+#if OCL_VSIZE != 4u
+#error "square128 NVIDIA pad16 experiment requires OCL_VSIZE == 4"
+#endif
+#if BLK128 != 2
+#error "square128 NVIDIA pad16 experiment requires BLK128 == 2"
+#endif
+#endif
+
+#ifndef GENEFER_GPU_CARRY_SHIFT5_NVIDIA_GFN16
+#define GENEFER_GPU_CARRY_SHIFT5_NVIDIA_GFN16 0u
+#endif
+
 #define BLK256		 1
 #define BLK512		 1	// local size = BLK512 * 512 * sizeof(VTYPE) = 8KB, workgroup size = BLK512 * 512 / 8 = 64
 #define CHUNK64		 4	// local size = CHUNK64 * 64 * sizeof(VTYPE) = 4KB, workgroup size = CHUNK64 * 64 / 8 = 32
@@ -106,11 +124,30 @@ private:
 public:
 	engine(const platform & platform, const size_t device_id, const int ln, const bool is_boinc, const size_t num_regs)
 		: device(platform, device_id), _n(size_t(1) << ln), _ln(ln), _is_boinc(is_boinc), _num_regs(num_regs),
+#if GENEFER_GPU_CARRY_SHIFT5_NVIDIA_GFN16
+		_carry_shift(((ln == 16) && isNVIDIA())
+			? 5
+			: ilog2_32(uint32_t(std::min(_n / CARRY_LENGTH, std::min(size_t(256), getMaxWorkGroupSize())) / OCL_VSIZE)) ) {}
+#else
 		_carry_shift(ilog2_32(uint32_t(std::min(_n / CARRY_LENGTH, std::min(size_t(256), getMaxWorkGroupSize())) / OCL_VSIZE))) {}
+#endif
 	virtual ~engine() {}
 
 	int get_carry_shift() const { return _carry_shift; }
 	size_t get_carry_workgroup_size() const { return (OCL_VSIZE << _carry_shift) / OCL_CARRY_VSIZE; }
+
+	bool use_sq128_pad16_nvidia() const
+	{
+		return
+			(GENEFER_GPU_SQ128_PAD16_NVIDIA != 0u)
+			&& (_ln % 3 == 1)
+			&& isNVIDIA();
+	}
+
+	size_t get_square128_local_slots() const
+	{
+		return use_sq128_pad16_nvidia() ? 136u : 128u;
+	}
 
 ///////////////////////////////
 
@@ -252,7 +289,7 @@ public:
 		CREATE_TRANSFORM_KERNEL_DYN(square32, 32 * BLK32);
 		CREATE_TRANSFORM_KERNEL_DYN(square64, 64 * BLK64);
 #else
-		if      (_ln % 3 == 1) { CREATE_TRANSFORM_KERNEL_DYN(square128, 128 * BLK128); }
+		if      (_ln % 3 == 1) { CREATE_TRANSFORM_KERNEL_DYN(square128, get_square128_local_slots() * BLK128); }
 		else if (_ln % 3 == 2) { CREATE_TRANSFORM_KERNEL_DYN(square256, 256 * BLK256); }
 		else                   { CREATE_TRANSFORM_KERNEL_DYN(square512, 512 * BLK512); }
 #endif
